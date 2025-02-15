@@ -6,4 +6,4 @@ pydantic
 setuptools>=65.5.0
 wheel
 openai
-pybluez
+pybluez==0.23
