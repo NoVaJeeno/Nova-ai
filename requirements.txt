@@ -3,7 +3,7 @@ uvicorn
 sqlalchemy
 python-multipart
 pydantic
-pybluez
-wifi
+pybluez==0.23
+wifi==0.3.8
 setuptools>=65.5.0
 wheel
