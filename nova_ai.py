@@ -8,7 +8,6 @@ import os
 import json
 import shutil
 import subprocess
-import bluetooth
 import requests
 import secrets
 import speech_recognition as sr
@@ -16,7 +15,7 @@ import pyttsx3
 
 # == Sicherheitseinstellungen ==
 MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
-ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN & Bluetooth gesperrt
+ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN gesperrt
 AUTO_UPDATE = False  # Standardmäßig keine automatischen Updates
 
 # == Initialisiere FastAPI ==
@@ -128,37 +127,4 @@ async def upload_file(api_key: str, file: UploadFile = File(...), db: Session = 
         shutil.copyfileobj(file.file, f)
     return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
 
-# == Verbindung zu GitHub zum autonomen Lernen ==
-@app.post("/github_learn")
-async def github_learn(api_key: str, repo_url: str, db: Session = Depends(get_db)):
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    repo_name = repo_url.split("/")[-1]
-    os.system(f"git clone {repo_url} repos/{repo_name}")
-
-    return {"message": f"Repository {repo_name} wurde heruntergeladen und analysiert."}
-
-# == WLAN- & Bluetooth-Sicherheit ==
-@app.post("/toggle_connections")
-async def toggle_connections(api_key: str, enable: bool, db: Session = Depends(get_db)):
-    global ALLOW_CONNECTIONS
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-    
-    ALLOW_CONNECTIONS = enable
-    return {"message": f"Verbindungen {'aktiviert' if enable else 'deaktiviert'}"}
-
-# == Automatische Updates der Webseite ==
-@app.post("/toggle_auto_update")
-async def toggle_auto_update(api_key: str, enable: bool, db: Session = Depends(get_db)):
-    global AUTO_UPDATE
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    AUTO_UPDATE = enable
-    return {"message": f"Auto-Updates {'aktiviert' if enable else 'deaktiviert'}"}
-
-# == Start der API ==
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+# == Verbindung zu GitHub zum autonomen
