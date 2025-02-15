@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nova AI Chat</title>
+    <style>
+        body {
+            background-color: black;
+            color: cyan;
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+        }
+        input, button {
+            background-color: transparent;
+            color: cyan;
+            border: 1px solid cyan;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧠 Nova AI - Dein persönlicher Assistent</h1>
+    <input type="text" id="message" placeholder="Schreibe eine Nachricht...">
+    <button onclick="sendMessage()">Senden</button>
+    <p id="response"></p>
+
+    <input type="file" id="fileInput">
+    <button onclick="uploadFile()">📂 Datei hochladen</button>
+    <p id="uploadStatus"></p>
+
+    <button onclick="scanBluetooth()">🔵 Bluetooth scannen</button>
+    <p id="bluetoothResult"></p>
+
+    <button onclick="scanWifi()">📡 WLAN scannen</button>
+    <p id="wifiResult"></p>
+
+    <script>
+        async function sendMessage() {
+            const message = document.getElementById("message").value;
+            const response = await fetch("/chat/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: message })
+            });
+            const data = await response.json();
+            document.getElementById("response").innerText = data.message;
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById("fileInput").files[0];
+            const formData = new FormData();
+            formData.append("file", fileInput);
+            const response = await fetch("/upload/", {
+                method: "POST",
+                body: formData
+            });
+            const data = await response.json();
+            document.getElementById("uploadStatus").innerText = data.message;
+        }
+
+        async function scanBluetooth() {
+            const response = await fetch("/bluetooth/");
+            const data = await response.json();
+            document.getElementById("bluetoothResult").innerText = JSON.stringify(data.devices);
+        }
+
+        async function scanWifi() {
+            const response = await fetch("/wifi/");
+            const data = await response.json();
+            document.getElementById("wifiResult").innerText = JSON.stringify(data.networks);
+        }
+    </script>
+</body>
+</html>
