@@ -4,11 +4,8 @@ sqlalchemy
 python-multipart
 pydantic
 requests
-secrets
 speechrecognition
 pyttsx3
 openai
-email-validator
-twilio
 setuptools>=65.5.0
-Wheel
+wheel
