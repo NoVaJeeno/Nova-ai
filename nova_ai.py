@@ -91,3 +91,35 @@ def self_learn(topic: str):
 # == Starte Uvicorn-Server ==
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=10000)
+    from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+from sqlalchemy import Column, Integer, String, create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+import os
+
+# FastAPI App
+app = FastAPI()
+
+# Datenbankverbindung
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nova_ai.db")
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Datenmodell für Wissen
+class Knowledge(Base):
+    __tablename__ = "knowledge"
+    id = Column(Integer, primary_key=True, index=True)
+    question = Column(String, unique=True, index=True)
+    answer = Column(String)
+
+# Datenbank erstellen
+Base.metadata.create_all(bind=engine)
+
+# Datenbank-Sitzung erhalten
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
