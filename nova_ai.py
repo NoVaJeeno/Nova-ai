@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -7,19 +8,21 @@ import openai
 import os
 import json
 import shutil
-import subprocess
-import requests
 import secrets
+import requests
 import speech_recognition as sr
 import pyttsx3
 
 # == Sicherheitseinstellungen ==
 MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
-ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN & Bluetooth gesperrt
+ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN-Verbindungen gesperrt
 AUTO_UPDATE = False  # Standardmäßig keine automatischen Updates
 
 # == Initialisiere FastAPI ==
 app = FastAPI()
+
+# Statische Dateien für Favicon und andere statische Inhalte bereitstellen
+app.mount("/", StaticFiles(directory="."), name="static")
 
 # == Datenbank-Konfiguration ==
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nova_ai.db")
@@ -81,9 +84,9 @@ async def validate_key(api_key: str, db: Session = Depends(get_db)):
     if validate_api_key(db, api_key):
         return {"message": "API-Schlüssel ist gültig!"}
     else:
-        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel")
+        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel"}
 
-# == Sprachsteuerung ==
+# == Sprachsteuerung (Sprache-zu-Text) ==
 @app.get("/voice_command")
 def voice_command():
     recognizer = sr.Recognizer()
@@ -101,7 +104,7 @@ def voice_command():
     except sr.RequestError:
         return {"error": "Sprachsteuerung nicht verfügbar"}
 
-# == KI-Chat mit GPT (Ähnlich wie ChatGPT) ==
+# == KI-Chat mit GPT ==
 @app.post("/chat")
 async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
     if not validate_api_key(db, api_key):
@@ -137,16 +140,6 @@ async def github_learn(api_key: str, repo_url: str, db: Session = Depends(get_db
     os.system(f"git clone {repo_url} repos/{repo_name}")
 
     return {"message": f"Repository {repo_name} wurde heruntergeladen und analysiert."}
-
-# == WLAN-Sicherheit (Bluetooth entfernt) ==
-@app.post("/toggle_connections")
-async def toggle_connections(api_key: str, enable: bool, db: Session = Depends(get_db)):
-    global ALLOW_CONNECTIONS
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-    
-    ALLOW_CONNECTIONS = enable
-    return {"message": f"WLAN {'aktiviert' if enable else 'deaktiviert'}"}
 
 # == Automatische Updates der Webseite ==
 @app.post("/toggle_auto_update")
