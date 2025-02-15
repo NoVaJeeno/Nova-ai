@@ -1,30 +1,47 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
-from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import create_engine, Column, Integer, String, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+import uvicorn
+import openai
 import os
+import json
 import shutil
-import zipfile
+import subprocess
 import bluetooth
-import wifi
+import requests
+import secrets
+import speech_recognition as sr
+import pyttsx3
 
-# Initialisiere FastAPI
+# == Sicherheitseinstellungen ==
+MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
+ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN & Bluetooth gesperrt
+AUTO_UPDATE = False  # Standardmäßig keine automatischen Updates
+
+# == Initialisiere FastAPI ==
 app = FastAPI()
 
 # == Datenbank-Konfiguration ==
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nova_ai.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-class Knowledge(Base):
-    __tablename__ = "knowledge"
+class Memory(Base):
+    __tablename__ = "memory"
     id = Column(Integer, primary_key=True, index=True)
-    question = Column(String, unique=True, index=True)
-    answer = Column(String)
+    key = Column(String, unique=True, index=True)
+    value = Column(Text)
+
+class APIKey(Base):
+    __tablename__ = "api_keys"
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True)
 
 Base.metadata.create_all(bind=engine)
 
+# == Datenbank-Funktionen ==
 def get_db():
     db = SessionLocal()
     try:
@@ -32,63 +49,116 @@ def get_db():
     finally:
         db.close()
 
-# == Chat-Funktion mit Lernen ==
-class Message(BaseModel):
-    text: str
-
-@app.post("/chat/")
-async def chat(message: Message, db=Depends(get_db)):
-    user_input = message.text.lower()
-    existing_knowledge = db.query(Knowledge).filter(Knowledge.question == user_input).first()
-    if existing_knowledge:
-        return {"message": existing_knowledge.answer}
-    new_answer = f"Ich weiß noch nicht viel über '{message.text}', kannst du mir mehr sagen?"
-    new_entry = Knowledge(question=user_input, answer=new_answer)
-    db.add(new_entry)
-    db.commit()
-    return {"message": new_answer}
-
-class LearnData(BaseModel):
-    question: str
-    answer: str
-
-@app.post("/learn/")
-async def learn(data: LearnData, db=Depends(get_db)):
-    existing_entry = db.query(Knowledge).filter(Knowledge.question == data.question.lower()).first()
-    if existing_entry:
-        existing_entry.answer = data.answer
+def store_memory(db: Session, key: str, value: str):
+    existing = db.query(Memory).filter(Memory.key == key).first()
+    if existing:
+        existing.value = value
     else:
-        new_entry = Knowledge(question=data.question.lower(), answer=data.answer)
-        db.add(new_entry)
+        db.add(Memory(key=key, value=value))
     db.commit()
-    return {"message": "Nova AI hat dazugelernt!"}
 
-# == Datei-Upload (ZIP und andere Formate) ==
-UPLOAD_FOLDER = "./uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+def recall_memory(db: Session, key: str):
+    result = db.query(Memory).filter(Memory.key == key).first()
+    return result.value if result else None
 
-@app.post("/upload/")
-async def upload_file(file: UploadFile = File(...)):
-    file_location = f"{UPLOAD_FOLDER}/{file.filename}"
-    with open(file_location, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+def validate_api_key(db: Session, api_key: str):
+    return db.query(APIKey).filter(APIKey.key == api_key).first() is not None
+
+# == API-Schlüssel erstellen ==
+@app.post("/generate_key")
+async def generate_key(master_key: str, db: Session = Depends(get_db)):
+    if master_key != MASTER_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    new_key = secrets.token_hex(32)
+    db.add(APIKey(key=new_key))
+    db.commit()
+
+    return {"message": "API-Schlüssel erstellt!", "api_key": new_key}
+
+# == API-Schlüssel überprüfen ==
+@app.post("/validate_key")
+async def validate_key(api_key: str, db: Session = Depends(get_db)):
+    if validate_api_key(db, api_key):
+        return {"message": "API-Schlüssel ist gültig!"}
+    else:
+        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel")
+
+# == Sprachsteuerung ==
+@app.get("/voice_command")
+def voice_command():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("Warte auf Sprachbefehl...")
+        recognizer.adjust_for_ambient_noise(source)
+        audio = recognizer.listen(source)
     
-    # Falls es ein ZIP-Archiv ist, entpacken
-    if file.filename.endswith(".zip"):
-        with zipfile.ZipFile(file_location, 'r') as zip_ref:
-            zip_ref.extractall(UPLOAD_FOLDER)
-        return {"message": f"ZIP-Datei {file.filename} wurde entpackt!"}
+    try:
+        command = recognizer.recognize_google(audio, language="de-DE")
+        print(f"Erkannter Befehl: {command}")
+        return {"command": command}
+    except sr.UnknownValueError:
+        return {"error": "Sprachbefehl nicht verstanden"}
+    except sr.RequestError:
+        return {"error": "Sprachsteuerung nicht verfügbar"}
+
+# == KI-Chat mit GPT ==
+@app.post("/chat")
+async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
+    if not validate_api_key(db, api_key):
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    context = recall_memory(db, "chat_history") or ""
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": context}, {"role": "user", "content": input_text}],
+    )
+    reply = response["choices"][0]["message"]["content"]
+    store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + reply)
+    return {"response": reply}
+
+# == Datei-/Bild-Upload ==
+@app.post("/upload")
+async def upload_file(api_key: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    if not validate_api_key(db, api_key):
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    file_location = f"uploads/{file.filename}"
+    with open(file_location, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
+
+# == Verbindung zu GitHub zum autonomen Lernen ==
+@app.post("/github_learn")
+async def github_learn(api_key: str, repo_url: str, db: Session = Depends(get_db)):
+    if api_key != MASTER_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    repo_name = repo_url.split("/")[-1]
+    os.system(f"git clone {repo_url} repos/{repo_name}")
+
+    return {"message": f"Repository {repo_name} wurde heruntergeladen und analysiert."}
+
+# == WLAN- & Bluetooth-Sicherheit ==
+@app.post("/toggle_connections")
+async def toggle_connections(api_key: str, enable: bool, db: Session = Depends(get_db)):
+    global ALLOW_CONNECTIONS
+    if api_key != MASTER_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
     
-    return {"message": f"Datei {file.filename} hochgeladen!"}
+    ALLOW_CONNECTIONS = enable
+    return {"message": f"Verbindungen {'aktiviert' if enable else 'deaktiviert'}"}
 
-# == Bluetooth-Geräte scannen ==
-@app.get("/bluetooth/")
-async def scan_bluetooth():
-    devices = bluetooth.discover_devices(duration=5, lookup_names=True)
-    return {"devices": [{"name": name, "address": addr} for addr, name in devices]}
+# == Automatische Updates der Webseite ==
+@app.post("/toggle_auto_update")
+async def toggle_auto_update(api_key: str, enable: bool, db: Session = Depends(get_db)):
+    global AUTO_UPDATE
+    if api_key != MASTER_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
-# == WLAN-Netzwerke scannen ==
-@app.get("/wifi/")
-async def scan_wifi():
-    networks = wifi.Cell.all('wlan0')  # Falls nötig, 'wlan0' anpassen
-    return {"networks": [{"ssid": net.ssid, "signal": net.signal} for net in networks]}
+    AUTO_UPDATE = enable
+    return {"message": f"Auto-Updates {'aktiviert' if enable else 'deaktiviert'}"}
+
+# == Start der API ==
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=10000)
