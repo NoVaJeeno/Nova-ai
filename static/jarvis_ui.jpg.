@@ -1,0 +1,2 @@
+git commit -m "Falsche Datei entfernt"
+git push origin main
