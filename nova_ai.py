@@ -12,9 +12,11 @@ import secrets
 import requests
 import speech_recognition as sr
 import pyttsx3
+from dotenv import load_dotenv
 
-# == API-Schlüssel für OpenAI ==
-OPENAI_API_KEY = "proj_4raSKB0xnebxREdmJdAEyxti"
+# == Lade API-Schlüssel sicher aus einer .env Datei ==
+load_dotenv("openai_key.env")  # Lädt Umgebungsvariablen aus `openai_key.env`
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # == Sicherheitseinstellungen ==
 MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
@@ -24,7 +26,7 @@ AUTO_UPDATE = False  # Standardmäßig keine automatischen Updates
 # == Initialisiere FastAPI ==
 app = FastAPI()
 
-# Statische Dateien für Favicon und andere statische Inhalte bereitstellen
+# Statische Dateien bereitstellen
 app.mount("/", StaticFiles(directory="."), name="static")
 
 # == Datenbank-Konfiguration ==
@@ -112,6 +114,9 @@ def voice_command():
 async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
     if not validate_api_key(db, api_key):
         raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="Fehlender OpenAI API-Schlüssel!")
 
     context = recall_memory(db, "chat_history") or ""
     response = openai.ChatCompletion.create(
