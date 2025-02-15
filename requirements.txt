@@ -3,8 +3,12 @@ uvicorn
 sqlalchemy
 python-multipart
 pydantic
-wifi
+requests
+secrets
+speechrecognition
+pyttsx3
+openai
+email-validator
+twilio
 setuptools>=65.5.0
 wheel
-openai
-pybluez
