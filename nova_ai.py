@@ -128,3 +128,6 @@ async def upload_file(api_key: str, file: UploadFile = File(...), db: Session = 
     return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
 
 # == Verbindung zu GitHub zum autonomen
+@app.get("/")
+def read_root():
+    return {"message": "Nova AI ist aktiv! Willkommen!"}
