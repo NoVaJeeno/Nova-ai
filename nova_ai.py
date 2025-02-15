@@ -15,7 +15,7 @@ import pyttsx3
 
 # == Sicherheitseinstellungen ==
 MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
-ALLOW_CONNECTIONS = False  # Standardmäßig sind externe Verbindungen gesperrt
+ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN & Bluetooth gesperrt
 AUTO_UPDATE = False  # Standardmäßig keine automatischen Updates
 
 # == Initialisiere FastAPI ==
@@ -81,7 +81,7 @@ async def validate_key(api_key: str, db: Session = Depends(get_db)):
     if validate_api_key(db, api_key):
         return {"message": "API-Schlüssel ist gültig!"}
     else:
-        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel"}
+        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel")
 
 # == Sprachsteuerung ==
 @app.get("/voice_command")
@@ -101,7 +101,7 @@ def voice_command():
     except sr.RequestError:
         return {"error": "Sprachsteuerung nicht verfügbar"}
 
-# == KI-Chat mit GPT ==
+# == KI-Chat mit GPT (Ähnlich wie ChatGPT) ==
 @app.post("/chat")
 async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
     if not validate_api_key(db, api_key):
@@ -138,6 +138,16 @@ async def github_learn(api_key: str, repo_url: str, db: Session = Depends(get_db
 
     return {"message": f"Repository {repo_name} wurde heruntergeladen und analysiert."}
 
+# == WLAN-Sicherheit (Bluetooth entfernt) ==
+@app.post("/toggle_connections")
+async def toggle_connections(api_key: str, enable: bool, db: Session = Depends(get_db)):
+    global ALLOW_CONNECTIONS
+    if api_key != MASTER_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    ALLOW_CONNECTIONS = enable
+    return {"message": f"WLAN {'aktiviert' if enable else 'deaktiviert'}"}
+
 # == Automatische Updates der Webseite ==
 @app.post("/toggle_auto_update")
 async def toggle_auto_update(api_key: str, enable: bool, db: Session = Depends(get_db)):
@@ -147,11 +157,6 @@ async def toggle_auto_update(api_key: str, enable: bool, db: Session = Depends(g
 
     AUTO_UPDATE = enable
     return {"message": f"Auto-Updates {'aktiviert' if enable else 'deaktiviert'}"}
-
-# == Root-Route (Fix für 405 Fehler) ==
-@app.get("/", methods=["GET", "HEAD"])
-def read_root():
-    return {"message": "Nova AI ist aktiv! Willkommen!"}
 
 # == Start der API ==
 if __name__ == "__main__":
