@@ -14,23 +14,25 @@ import speech_recognition as sr
 import pyttsx3
 from dotenv import load_dotenv
 
-# == Lade API-Schlüssel sicher aus einer .env Datei ==
-load_dotenv("openai_key.env")  # Lädt Umgebungsvariablen aus `openai_key.env`
+# == Sicherheitskonfiguration ==
+load_dotenv()  # Falls lokal, lädt .env Datei
+
+# API-Schlüssel aus Environment Variablen abrufen
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# == Sicherheitseinstellungen ==
-MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
-ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN-Verbindungen gesperrt
-AUTO_UPDATE = False  # Standardmäßig keine automatischen Updates
+if not OPENAI_API_KEY:
+    raise RuntimeError("❌ API-Schlüssel nicht gefunden! Stelle sicher, dass OPENAI_API_KEY in den Render Environment Variables gesetzt ist.")
+
+openai.api_key = OPENAI_API_KEY  # Setzt den OpenAI API Key
 
 # == Initialisiere FastAPI ==
 app = FastAPI()
 
-# Statische Dateien bereitstellen
-app.mount("/", StaticFiles(directory="."), name="static")
+# Statische Dateien (für das J.A.R.V.I.S. Design)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # == Datenbank-Konfiguration ==
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nova_ai.db")
+DATABASE_URL = "sqlite:///./nova_ai.db"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -40,11 +42,6 @@ class Memory(Base):
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String, unique=True, index=True)
     value = Column(Text)
-
-class APIKey(Base):
-    __tablename__ = "api_keys"
-    id = Column(Integer, primary_key=True, index=True)
-    key = Column(String, unique=True, index=True)
 
 Base.metadata.create_all(bind=engine)
 
@@ -68,30 +65,34 @@ def recall_memory(db: Session, key: str):
     result = db.query(Memory).filter(Memory.key == key).first()
     return result.value if result else None
 
-def validate_api_key(db: Session, api_key: str):
-    return db.query(APIKey).filter(APIKey.key == api_key).first() is not None
+# == API-Routen ==
 
-# == API-Schlüssel erstellen ==
-@app.post("/generate_key")
-async def generate_key(master_key: str, db: Session = Depends(get_db)):
-    if master_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
+@app.get("/")
+async def home():
+    return {
+        "message": "🚀 Nova AI ist jetzt aktiv!",
+        "status": "running",
+        "design": "J.A.R.V.I.S UI"
+    }
 
-    new_key = secrets.token_hex(32)
-    db.add(APIKey(key=new_key))
-    db.commit()
+@app.post("/chat")
+async def chat(input_text: str, db: Session = Depends(get_db)):
+    context = recall_memory(db, "chat_history") or ""
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": context}, {"role": "user", "content": input_text}],
+    )
+    reply = response["choices"][0]["message"]["content"]
+    store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + reply)
+    return {"response": reply}
 
-    return {"message": "API-Schlüssel erstellt!", "api_key": new_key}
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    file_location = f"uploads/{file.filename}"
+    with open(file_location, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
 
-# == API-Schlüssel überprüfen ==
-@app.post("/validate_key")
-async def validate_key(api_key: str, db: Session = Depends(get_db)):
-    if validate_api_key(db, api_key):
-        return {"message": "API-Schlüssel ist gültig!"}
-    else:
-        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel"}
-
-# == Sprachsteuerung (Sprache-zu-Text) ==
 @app.get("/voice_command")
 def voice_command():
     recognizer = sr.Recognizer()
@@ -108,57 +109,6 @@ def voice_command():
         return {"error": "Sprachbefehl nicht verstanden"}
     except sr.RequestError:
         return {"error": "Sprachsteuerung nicht verfügbar"}
-
-# == KI-Chat mit GPT ==
-@app.post("/chat")
-async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
-    if not validate_api_key(db, api_key):
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    if not OPENAI_API_KEY:
-        raise HTTPException(status_code=500, detail="Fehlender OpenAI API-Schlüssel!")
-
-    context = recall_memory(db, "chat_history") or ""
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "system", "content": context}, {"role": "user", "content": input_text}],
-        api_key=OPENAI_API_KEY  # API-Schlüssel wird hier verwendet
-    )
-    reply = response["choices"][0]["message"]["content"]
-    store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + reply)
-    return {"response": reply}
-
-# == Datei-/Bild-Upload ==
-@app.post("/upload")
-async def upload_file(api_key: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not validate_api_key(db, api_key):
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    file_location = f"uploads/{file.filename}"
-    with open(file_location, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
-
-# == Verbindung zu GitHub zum autonomen Lernen ==
-@app.post("/github_learn")
-async def github_learn(api_key: str, repo_url: str, db: Session = Depends(get_db)):
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    repo_name = repo_url.split("/")[-1]
-    os.system(f"git clone {repo_url} repos/{repo_name}")
-
-    return {"message": f"Repository {repo_name} wurde heruntergeladen und analysiert."}
-
-# == Automatische Updates der Webseite ==
-@app.post("/toggle_auto_update")
-async def toggle_auto_update(api_key: str, enable: bool, db: Session = Depends(get_db)):
-    global AUTO_UPDATE
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    AUTO_UPDATE = enable
-    return {"message": f"Auto-Updates {'aktiviert' if enable else 'deaktiviert'}"}
 
 # == Start der API ==
 if __name__ == "__main__":
