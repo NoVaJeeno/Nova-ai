@@ -9,3 +9,4 @@ pyttsx3
 openai
 setuptools>=65.5.0
 wheel
+python-dotenv
