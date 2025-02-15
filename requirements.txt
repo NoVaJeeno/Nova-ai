@@ -11,4 +11,4 @@ openai
 email-validator
 twilio
 setuptools>=65.5.0
-wheel
+Wheel
