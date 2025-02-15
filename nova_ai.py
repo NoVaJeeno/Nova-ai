@@ -13,6 +13,9 @@ import requests
 import speech_recognition as sr
 import pyttsx3
 
+# == API-Schlüssel für OpenAI ==
+OPENAI_API_KEY = "proj_4raSKB0xnebxREdmJdAEyxti"
+
 # == Sicherheitseinstellungen ==
 MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
 ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN-Verbindungen gesperrt
@@ -114,6 +117,7 @@ async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
     response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[{"role": "system", "content": context}, {"role": "user", "content": input_text}],
+        api_key=OPENAI_API_KEY  # API-Schlüssel wird hier verwendet
     )
     reply = response["choices"][0]["message"]["content"]
     store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + reply)
