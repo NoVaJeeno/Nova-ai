@@ -5,3 +5,5 @@ python-multipart
 pydantic
 pybluez
 wifi
+setuptools>=65.5.0
+wheel
