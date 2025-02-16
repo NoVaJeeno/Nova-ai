@@ -1,37 +1,33 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import uvicorn
-import openai
 import os
 import shutil
-import secrets
 import requests
 import speech_recognition as sr
 import pyttsx3
+import json
+import secrets
+from gpt4all import GPT4All
 from dotenv import load_dotenv
 
-# == Umgebungsvariablen aus `.env` laden ==
+# == Lade Umgebungsvariablen ==
 load_dotenv()
 
-# == API-Schlüssel aus den Umgebungsvariablen lesen ==
-API_KEY = os.environ.get("OPENAI_API_KEY")
-if not API_KEY:
-    raise RuntimeError("❌ API-Schlüssel nicht gefunden! Stelle sicher, dass OPENAI_API_KEY in den Render Environment Variables gesetzt ist.")
-
-# == OpenAI API-Schlüssel global setzen ==
-openai.api_key = API_KEY
+# == Initialisiere GPT4All (Offline KI) ==
+llm = GPT4All("ggml-gpt4all-j-v1.3.bin")
 
 # == Sicherheitseinstellungen ==
 MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")
-ALLOW_CONNECTIONS = False
-AUTO_UPDATE = False
 
 # == Initialisiere FastAPI ==
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 # == Datenbank-Konfiguration ==
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nova_ai.db")
@@ -44,11 +40,6 @@ class Memory(Base):
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String, unique=True, index=True)
     value = Column(Text)
-
-class APIKey(Base):
-    __tablename__ = "api_keys"
-    id = Column(Integer, primary_key=True, index=True)
-    key = Column(String, unique=True, index=True)
 
 Base.metadata.create_all(bind=engine)
 
@@ -72,34 +63,16 @@ def recall_memory(db: Session, key: str):
     result = db.query(Memory).filter(Memory.key == key).first()
     return result.value if result else None
 
-def validate_api_key(db: Session, api_key: str):
-    return db.query(APIKey).filter(APIKey.key == api_key).first() is not None
-
-# == API-Schlüssel erstellen ==
-@app.post("/generate_key")
-async def generate_key(master_key: str, db: Session = Depends(get_db)):
-    if master_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    new_key = secrets.token_hex(32)
-    db.add(APIKey(key=new_key))
-    db.commit()
-    return {"message": "API-Schlüssel erstellt!", "api_key": new_key}
-
-# == API-Schlüssel überprüfen ==
-@app.post("/validate_key")
-async def validate_key(api_key: str, db: Session = Depends(get_db)):
-    if validate_api_key(db, api_key):
-        return {"message": "API-Schlüssel ist gültig!"}
-    else:
-        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel")
+# == Web-Interface ==
+@app.get("/")
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 # == Sprachsteuerung (Sprache-zu-Text) ==
 @app.get("/voice_command")
 def voice_command():
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
-        print("Warte auf Sprachbefehl...")
         recognizer.adjust_for_ambient_noise(source)
         audio = recognizer.listen(source)
     
@@ -111,32 +84,36 @@ def voice_command():
     except sr.RequestError:
         return {"error": "Sprachsteuerung nicht verfügbar"}
 
-# == KI-Chat mit GPT ==
+# == KI-Chat mit GPT4All ==
 @app.post("/chat")
-async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
-    if not validate_api_key(db, api_key):
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
+async def chat(input_text: str, db: Session = Depends(get_db)):
     context = recall_memory(db, "chat_history") or ""
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "system", "content": context}, {"role": "user", "content": input_text}]
-    )
-    reply = response["choices"][0]["message"]["content"]
-    store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + reply)
-    return {"response": reply}
+    response = llm.generate(context + "\nUser: " + input_text)
+    store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + response)
+    return {"response": response}
 
-# == Datei-Upload ==
-@app.post("/upload")
-async def upload_file(api_key: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not validate_api_key(db, api_key):
-        raise HTTPException(status_code=403, detail="Unauthorized")
+# == WLAN-Status überprüfen ==
+@app.get("/wifi_status")
+def wifi_status():
+    try:
+        response = os.system("ping -c 1 8.8.8.8")
+        return {"status": "Verbunden" if response == 0 else "Nicht verbunden"}
+    except Exception as e:
+        return {"error": str(e)}
 
-    os.makedirs("uploads", exist_ok=True)
-    file_location = f"uploads/{file.filename}"
-    with open(file_location, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
+# == Standort abrufen ==
+@app.get("/get_location")
+def get_location():
+    try:
+        response = requests.get("http://ip-api.com/json/")
+        location_data = response.json()
+        return {
+            "Stadt": location_data["city"],
+            "Land": location_data["country"],
+            "IP": location_data["query"]
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 # == Start der API ==
 if __name__ == "__main__":
