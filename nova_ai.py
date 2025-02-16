@@ -6,28 +6,31 @@ from sqlalchemy.orm import sessionmaker, Session
 import uvicorn
 import openai
 import os
-import json
 import shutil
 import secrets
 import requests
 import speech_recognition as sr
 import pyttsx3
+from dotenv import load_dotenv
 
-# == API-Schlüssel aus den Umgebungsvariablen auslesen ==
-API_KEY = os.getenv("OPENAI_API_KEY")
+# == Umgebungsvariablen aus `.env` laden ==
+load_dotenv()
 
+# == API-Schlüssel aus den Umgebungsvariablen lesen ==
+API_KEY = os.environ.get("OPENAI_API_KEY")
 if not API_KEY:
     raise RuntimeError("❌ API-Schlüssel nicht gefunden! Stelle sicher, dass OPENAI_API_KEY in den Render Environment Variables gesetzt ist.")
 
+# == OpenAI API-Schlüssel global setzen ==
+openai.api_key = API_KEY
+
 # == Sicherheitseinstellungen ==
-MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")  # Hauptschlüssel für Admin-Zugriff
-ALLOW_CONNECTIONS = False  # Standardmäßig sind WLAN-Verbindungen gesperrt
-AUTO_UPDATE = False  # Standardmäßig keine automatischen Updates
+MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")
+ALLOW_CONNECTIONS = False
+AUTO_UPDATE = False
 
 # == Initialisiere FastAPI ==
 app = FastAPI()
-
-# Statische Dateien für Favicon und andere statische Inhalte bereitstellen
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # == Datenbank-Konfiguration ==
@@ -81,7 +84,6 @@ async def generate_key(master_key: str, db: Session = Depends(get_db)):
     new_key = secrets.token_hex(32)
     db.add(APIKey(key=new_key))
     db.commit()
-
     return {"message": "API-Schlüssel erstellt!", "api_key": new_key}
 
 # == API-Schlüssel überprüfen ==
@@ -90,7 +92,7 @@ async def validate_key(api_key: str, db: Session = Depends(get_db)):
     if validate_api_key(db, api_key):
         return {"message": "API-Schlüssel ist gültig!"}
     else:
-        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel"}
+        raise HTTPException(status_code=403, detail="Ungültiger API-Schlüssel")
 
 # == Sprachsteuerung (Sprache-zu-Text) ==
 @app.get("/voice_command")
@@ -103,7 +105,6 @@ def voice_command():
     
     try:
         command = recognizer.recognize_google(audio, language="de-DE")
-        print(f"Erkannter Befehl: {command}")
         return {"command": command}
     except sr.UnknownValueError:
         return {"error": "Sprachbefehl nicht verstanden"}
@@ -119,44 +120,23 @@ async def chat(api_key: str, input_text: str, db: Session = Depends(get_db)):
     context = recall_memory(db, "chat_history") or ""
     response = openai.ChatCompletion.create(
         model="gpt-4",
-        messages=[{"role": "system", "content": context}, {"role": "user", "content": input_text}],
-        api_key=API_KEY
+        messages=[{"role": "system", "content": context}, {"role": "user", "content": input_text}]
     )
     reply = response["choices"][0]["message"]["content"]
     store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + reply)
     return {"response": reply}
 
-# == Datei-/Bild-Upload ==
+# == Datei-Upload ==
 @app.post("/upload")
 async def upload_file(api_key: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not validate_api_key(db, api_key):
         raise HTTPException(status_code=403, detail="Unauthorized")
 
+    os.makedirs("uploads", exist_ok=True)
     file_location = f"uploads/{file.filename}"
     with open(file_location, "wb") as f:
         shutil.copyfileobj(file.file, f)
     return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
-
-# == Verbindung zu GitHub zum autonomen Lernen ==
-@app.post("/github_learn")
-async def github_learn(api_key: str, repo_url: str, db: Session = Depends(get_db)):
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    repo_name = repo_url.split("/")[-1]
-    os.system(f"git clone {repo_url} repos/{repo_name}")
-
-    return {"message": f"Repository {repo_name} wurde heruntergeladen und analysiert."}
-
-# == Automatische Updates der Webseite ==
-@app.post("/toggle_auto_update")
-async def toggle_auto_update(api_key: str, enable: bool, db: Session = Depends(get_db)):
-    global AUTO_UPDATE
-    if api_key != MASTER_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-
-    AUTO_UPDATE = enable
-    return {"message": f"Auto-Updates {'aktiviert' if enable else 'deaktiviert'}"}
 
 # == Start der API ==
 if __name__ == "__main__":
