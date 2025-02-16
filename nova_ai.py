@@ -12,18 +12,15 @@ import speech_recognition as sr
 import pyttsx3
 import json
 import secrets
-from gpt4all import GPT4All
-from dotenv import load_dotenv
 import platform
-import subprocess
+from dotenv import load_dotenv
+from gpt4all import GPT4All
 
 # == Lade Umgebungsvariablen ==
 load_dotenv()
 
 # == Initialisiere GPT4All (Offline KI) ==
-MODEL_PATH = "./ggml-gpt4all-j-v1.3-groovy.bin"  # Pfad zum heruntergeladenen Modell
-if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(f"❌ Modell nicht gefunden: {MODEL_PATH}")
+MODEL_PATH = "ggml-gpt4all-j-v1.3.bin"
 llm = GPT4All(MODEL_PATH)
 
 # == Sicherheitseinstellungen ==
@@ -89,7 +86,7 @@ def voice_command():
     except sr.RequestError:
         return {"error": "Sprachsteuerung nicht verfügbar"}
 
-# == KI-Chat mit GPT4All ==
+# == KI-Chat mit GPT4All (Offline) ==
 @app.post("/chat")
 async def chat(input_text: str, db: Session = Depends(get_db)):
     context = recall_memory(db, "chat_history") or ""
@@ -101,7 +98,7 @@ async def chat(input_text: str, db: Session = Depends(get_db)):
 @app.get("/wifi_status")
 def wifi_status():
     try:
-        response = os.system("ping -c 1 8.8.8.8")
+        response = os.system("ping -c 1 8.8.8.8" if platform.system() != "Windows" else "ping -n 1 8.8.8.8")
         return {"status": "Verbunden" if response == 0 else "Nicht verbunden"}
     except Exception as e:
         return {"error": str(e)}
@@ -120,22 +117,28 @@ def get_location():
     except Exception as e:
         return {"error": str(e)}
 
-# == App-Analyse (Verbundene Programme & Prozesse) ==
+# == Datei-Upload ==
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    os.makedirs("uploads", exist_ok=True)
+    file_location = f"uploads/{file.filename}"
+    with open(file_location, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
+
+# == App-Analyse ==
 @app.get("/analyze_apps")
 def analyze_apps():
     try:
-        if platform.system() == "Windows":
-            result = subprocess.check_output("tasklist", shell=True, encoding="utf-8")
-        else:
-            result = subprocess.check_output("ps aux", shell=True, encoding="utf-8")
-        return {"apps": result.split("\n")}
+        apps = os.listdir("/Applications") if platform.system() == "Darwin" else os.listdir("C:\\Program Files")
+        return {"installed_apps": apps}
     except Exception as e:
         return {"error": str(e)}
 
-# == Software-Architektur erstellen ==
-@app.post("/build_architecture")
-def build_architecture(description: str):
-    return {"architecture": f"Nova hat eine Architektur basierend auf: {description} erstellt!"}
+# == Verbindung mit anderen Apps (Dummy Funktion) ==
+@app.post("/connect_app")
+async def connect_app(app_name: str):
+    return {"message": f"Verbindung mit {app_name} hergestellt!"}
 
 # == Start der API ==
 if __name__ == "__main__":
