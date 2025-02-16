@@ -25,6 +25,7 @@ openai
 
 # Umgebungsvariablen-Handling
 python-dotenv
+jinja2  # Für HTML-Templating
 
 # Paketverwaltung & Installation
 setuptools>=65.5.0
