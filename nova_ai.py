@@ -14,12 +14,17 @@ import json
 import secrets
 from gpt4all import GPT4All
 from dotenv import load_dotenv
+import platform
+import subprocess
 
 # == Lade Umgebungsvariablen ==
 load_dotenv()
 
 # == Initialisiere GPT4All (Offline KI) ==
-llm = GPT4All("ggml-gpt4all-j-v1.3.bin")
+MODEL_PATH = "./ggml-gpt4all-j-v1.3-groovy.bin"  # Pfad zum heruntergeladenen Modell
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(f"❌ Modell nicht gefunden: {MODEL_PATH}")
+llm = GPT4All(MODEL_PATH)
 
 # == Sicherheitseinstellungen ==
 MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")
@@ -114,6 +119,23 @@ def get_location():
         }
     except Exception as e:
         return {"error": str(e)}
+
+# == App-Analyse (Verbundene Programme & Prozesse) ==
+@app.get("/analyze_apps")
+def analyze_apps():
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.check_output("tasklist", shell=True, encoding="utf-8")
+        else:
+            result = subprocess.check_output("ps aux", shell=True, encoding="utf-8")
+        return {"apps": result.split("\n")}
+    except Exception as e:
+        return {"error": str(e)}
+
+# == Software-Architektur erstellen ==
+@app.post("/build_architecture")
+def build_architecture(description: str):
+    return {"architecture": f"Nova hat eine Architektur basierend auf: {description} erstellt!"}
 
 # == Start der API ==
 if __name__ == "__main__":
