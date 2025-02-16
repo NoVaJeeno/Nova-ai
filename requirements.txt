@@ -18,14 +18,13 @@ requests
 speechrecognition
 pyttsx3
 pydub  # Falls du mit Audiodateien arbeitest
-ffmpeg-python  # Falls ffmpeg für Audioverarbeitung benötigt wird
+ffmpeg-python  # Falls ffmpeg für Audioverarbeitung nötig ist
 
 # OpenAI API Unterstützung
 openai
 
 # Umgebungsvariablen-Handling
 python-dotenv
-jinja2  # Für HTML-Templating
 
 # Paketverwaltung & Installation
 setuptools>=65.5.0
