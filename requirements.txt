@@ -1,12 +1,31 @@
+# Web Framework & Server
 fastapi
 uvicorn
+
+# Datenbank-Management
 sqlalchemy
+psycopg2-binary  # Falls du PostgreSQL verwendest
+pymysql  # Falls du MySQL verwendest
+
+# Datei-Uploads & Validierung
 python-multipart
 pydantic
+
+# API-Requests & Sicherheit
 requests
+
+# Sprache-zu-Text & Text-zu-Sprache
 speechrecognition
 pyttsx3
+pydub  # Falls du mit Audiodateien arbeitest
+ffmpeg-python  # Falls ffmpeg für Audioverarbeitung benötigt wird
+
+# OpenAI API Unterstützung
 openai
+
+# Umgebungsvariablen-Handling
+python-dotenv
+
+# Paketverwaltung & Installation
 setuptools>=65.5.0
 wheel
-python-dotenv
