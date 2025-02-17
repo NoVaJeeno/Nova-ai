@@ -1,10 +1,8 @@
 flask
-fastapi
 uvicorn
 sqlite-utils
 pydantic
 requests
-openai
 gpt4all
 llama-cpp-python
 gunicorn
