@@ -4,7 +4,7 @@ uvicorn
 sqlite-utils
 pydantic
 requests
-gpt4all
+gpt4all==1.0.0
 llama-cpp-python
 werkzeug
 zipfile36
