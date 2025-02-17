@@ -1,12 +1,13 @@
 import os
 import sqlite3
+import json
 import zipfile
-import logging
-import requests
 import shutil
+import requests
 from flask import Flask, request, jsonify, render_template
+import logging
 from datetime import datetime
-from gpt4all import GPT4All  # Falls nicht verfügbar, wird eine Alternative heruntergeladen
+from gpt4all import GPT4All
 
 # Flask App initialisieren
 app = Flask(__name__)
@@ -32,67 +33,51 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS knowledge_base (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
     conn.commit()
     conn.close()
 
 init_db()
 
-# Verfügbare KI-Modelle prüfen & herunterladen
-MODEL_DIR = "models"
-MODEL_PATH = os.path.join(MODEL_DIR, "ggml-gpt4all-j.bin")
-MODEL_URL = "https://gpt4all.io/models/ggml-gpt4all-j.bin"
-
-os.makedirs(MODEL_DIR, exist_ok=True)
-
-def ensure_model():
-    """Prüft, ob das Modell vorhanden ist, und lädt es falls nötig herunter."""
-    if not os.path.exists(MODEL_PATH):
-        logging.info("KI-Modell nicht gefunden, lade es herunter...")
-        response = requests.get(MODEL_URL, stream=True)
-        with open(MODEL_PATH, "wb") as model_file:
-            shutil.copyfileobj(response.raw, model_file)
-        logging.info("Modell erfolgreich heruntergeladen!")
-    else:
-        logging.info("KI-Modell ist bereits vorhanden.")
-
-ensure_model()
-
-# Open-Source KI-Modell laden (GPT4All oder Alternative)
+# Open-Source KI-Modell laden mit automatischer Auswahl
 def load_ai_model():
-    try:
-        model = GPT4All(MODEL_PATH)
-        return model
-    except Exception:
-        return None
+    model_list = [
+        "models/ggml-gpt4all-j.bin",
+        "models/ggml-mistral.bin",
+        "models/ggml-llama2.bin"
+    ]
+    
+    for model_path in model_list:
+        if os.path.exists(model_path):
+            logging.info(f"🔄 Lade Modell: {model_path}")
+            return GPT4All(model_path)
+
+    logging.warning("⚠️ Kein Modell gefunden, versuche Download...")
+    download_model("models/ggml-gpt4all-j.bin")
+    return GPT4All("models/ggml-gpt4all-j.bin") if os.path.exists("models/ggml-gpt4all-j.bin") else None
+
+def download_model(model_path):
+    url = "https://gpt4all.io/models/ggml-gpt4all-j.bin"
+    os.makedirs("models", exist_ok=True)
+    response = requests.get(url, stream=True)
+    if response.status_code == 200:
+        with open(model_path, "wb") as f:
+            shutil.copyfileobj(response.raw, f)
+        logging.info("✅ Modell erfolgreich heruntergeladen!")
+    else:
+        logging.error("❌ Fehler beim Herunterladen des Modells!")
 
 ai_model = load_ai_model()
 
-# KI-Logik mit Lernen
+# KI-Logik mit Antworten
 def get_ai_response(message):
-    """Holt eine Antwort von Open-Source-KI oder speichert Wissen."""
+    """Holt eine Antwort von Open-Source-KI"""
     if ai_model:
         response = ai_model.generate(message)
         return response
     else:
-        save_knowledge(message)
-        return f"Ich habe die Information gespeichert: {message}"
+        return f"❌ KI-Modell konnte nicht geladen werden. Nachricht gespeichert: {message}"
 
-# Wissen speichern
-def save_knowledge(data):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO knowledge_base (data) VALUES (?)", (data,))
-    conn.commit()
-    conn.close()
-
-# ZIP-Datei analysieren
+# ZIP-Dateien analysieren
 @app.route("/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:
@@ -110,13 +95,6 @@ def upload_file():
         return jsonify({"message": "ZIP-Datei entpackt und analysiert"}), 200
 
     return jsonify({"message": f"Datei {file.filename} gespeichert"}), 200
-
-# Automatisches Code-Update über GitHub
-@app.route("/update", methods=["POST"])
-def update_code():
-    os.system("git pull origin main")
-    os.system("pip install -r requirements.txt")
-    return jsonify({"message": "Code aktualisiert!"}), 200
 
 # KI-Chat Route
 @app.route("/chat", methods=["POST"])
