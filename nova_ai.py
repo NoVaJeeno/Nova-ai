@@ -1,19 +1,19 @@
 import os
 import sqlite3
+import json
 import zipfile
 import subprocess
 import shutil
 import requests
+from flask import Flask, request, jsonify, render_template
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template
 from gpt4all import GPT4All  # Open-Source KI-Modelle
-import speech_recognition as sr
-import pyttsx3
 
 # Flask App initialisieren
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
+GITHUB_REPO = "https://github.com/DEIN_GITHUB_REPO"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
@@ -47,37 +47,30 @@ def init_db():
 
 init_db()
 
-# KI-Modell Pfad & automatisches Laden
-MODEL_DIR = "models"
-MODEL_FILE = "ggml-gpt4all-j.bin"
-MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILE)
-
-def download_ai_model():
-    """Lädt das KI-Modell herunter, falls es nicht existiert"""
-    if not os.path.exists(MODEL_DIR):
-        os.makedirs(MODEL_DIR)
-
-    if not os.path.exists(MODEL_PATH):
-        logging.info("Lade das KI-Modell herunter...")
-        url = "https://gpt4all.io/models/ggml-gpt4all-j.bin"  # URL ggf. anpassen
-        response = requests.get(url, stream=True)
-        
-        if response.status_code == 200:
-            with open(MODEL_PATH, "wb") as model_file:
-                shutil.copyfileobj(response.raw, model_file)
-            logging.info("Modell erfolgreich heruntergeladen.")
-        else:
-            logging.error("Fehler beim Herunterladen des KI-Modells.")
-
-download_ai_model()
-
-# Open-Source KI-Modell laden (mit Fallback)
+# Open-Source KI-Modell laden (GPT4All oder LLaMA.cpp)
 def load_ai_model():
+    model_path = "models/ggml-gpt4all-j.bin"
+
+    if not os.path.exists(model_path):
+        logging.info("KI-Modell nicht gefunden, lade es herunter...")
+        os.makedirs("models", exist_ok=True)
+        url = "https://gpt4all.io/models/ggml-gpt4all-j.bin"
+        
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            with open(model_path, "wb") as model_file:
+                shutil.copyfileobj(response.raw, model_file)
+            logging.info("KI-Modell erfolgreich heruntergeladen.")
+        else:
+            logging.error(f"Fehler beim Laden des KI-Modells: HTTP {response.status_code}")
+            return None
+
     try:
-        return GPT4All(MODEL_PATH)
-    except Exception:
-        logging.error("Fehler beim Laden des Hauptmodells. Alternative KI wird verwendet.")
-        return None  # Alternative Logik kann hier ergänzt werden
+        model = GPT4All(model_path)
+        return model
+    except Exception as e:
+        logging.error(f"Fehler beim Laden des KI-Modells: {e}")
+        return None
 
 ai_model = load_ai_model()
 
@@ -85,7 +78,12 @@ ai_model = load_ai_model()
 def get_ai_response(message):
     """Holt eine Antwort von Open-Source-KI"""
     if ai_model:
-        return ai_model.generate(message)
+        try:
+            response = ai_model.generate(message)
+            return response
+        except Exception as e:
+            logging.error(f"Fehler bei der KI-Antwort: {str(e)}")
+            return "Es gab einen Fehler mit der KI."
     else:
         save_knowledge(message)
         return f"Ich habe die Information gespeichert: {message}"
@@ -120,54 +118,36 @@ def upload_file():
 # Automatisches Code-Update über GitHub
 @app.route("/update", methods=["POST"])
 def update_code():
-    os.system("git pull origin main")
+    os.system(f"git pull {GITHUB_REPO}")
     os.system("pip install -r requirements.txt")
     return jsonify({"message": "Code aktualisiert!"}), 200
 
-# KI-Chat Route
+# KI-Chat Route mit Debugging
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
     user_message = data.get("message")
 
     if not user_message:
+        logging.error("Keine Nachricht empfangen!")
         return jsonify({"error": "Nachricht fehlt"}), 400
 
-    response = get_ai_response(user_message)
+    logging.info(f"Empfangene Nachricht: {user_message}")
 
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO chat_memory (user_message, ai_response) VALUES (?, ?)", (user_message, response))
-    conn.commit()
-    conn.close()
-
-    return jsonify({"response": response})
-
-# Sprachsteuerung (Spracheingabe & Sprachausgabe)
-def recognize_speech():
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        logging.info("Spracheingabe erkannt...")
-        audio = recognizer.listen(source)
     try:
-        return recognizer.recognize_google(audio)
-    except sr.UnknownValueError:
-        return "Konnte Sprache nicht erkennen."
-    except sr.RequestError:
-        return "Fehler beim Zugriff auf Sprachdienst."
+        response = get_ai_response(user_message)
+        logging.info(f"Antwort der KI: {response}")
 
-def speak(text):
-    engine = pyttsx3.init()
-    engine.say(text)
-    engine.runAndWait()
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("INSERT INTO chat_memory (user_message, ai_response) VALUES (?, ?)", (user_message, response))
+        conn.commit()
+        conn.close()
 
-# Sprachsteuerung Route
-@app.route("/voice", methods=["GET"])
-def voice_command():
-    command = recognize_speech()
-    response = get_ai_response(command)
-    speak(response)
-    return jsonify({"response": response})
+        return jsonify({"response": response})
+    except Exception as e:
+        logging.error(f"Fehler in der KI-Antwort: {str(e)}")
+        return jsonify({"error": "Interner Fehler"}), 500
 
 # Webinterface
 @app.route("/")
