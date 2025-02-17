@@ -1,1 +1,33 @@
-<script src="{{ url_for('static', filename='script.js') }}"></script>
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nova AI</title>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <h1>Nova AI - Dein persönlicher KI-Assistent</h1>
+    <form id="chat-form">
+        <input type="text" id="user-input" placeholder="Schreib deine Nachricht...">
+        <button type="submit">Senden</button>
+    </form>
+    <div id="chat-box"></div>
+    <script>
+        document.getElementById('chat-form').onsubmit = async function(event) {
+            event.preventDefault();
+            let input = document.getElementById("user-input").value;
+            let response = await fetch("/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: input })
+            });
+            let data = await response.json();
+            document.getElementById("chat-box").innerHTML += "<p><b>Du:</b> " + input + "</p>";
+            document.getElementById("chat-box").innerHTML += "<p><b>Nova AI:</b> " + data.response + "</p>";
+            document.getElementById("user-input").value = "";
+        };
+    </script>
+</body>
+</html>
