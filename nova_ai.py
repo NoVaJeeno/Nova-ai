@@ -1,145 +1,157 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-import uvicorn
 import os
-import shutil
-import requests
-import speech_recognition as sr
-import pyttsx3
+import time
 import json
-import secrets
-import platform
-from dotenv import load_dotenv
-from gpt4all import GPT4All
+import logging
+import subprocess
+import requests
+from threading import Thread
+from gpt4all import GPT4All  # Open-Source-KI
+from llama_cpp import Llama   # Alternative Open-Source-KI (Offline)
+import openai  # OpenAI API (Online)
 
-# == Lade Umgebungsvariablen ==
-load_dotenv()
+# 🛠 Automatische Installation der Abhängigkeiten
+try:
+    import openai, requests, gpt4all, llama_cpp
+except ImportError:
+    subprocess.run(["pip", "install", "openai", "requests", "gpt4all", "llama_cpp"])
 
-# == Initialisiere GPT4All (Offline KI) ==
-MODEL_PATH = "ggml-gpt4all-j-v1.3.bin"
-llm = GPT4All(MODEL_PATH)
+# 📂 Fortschrittsspeicherung
+CHECKPOINT_FILE = "nova_x_progress.json"
 
-# == Sicherheitseinstellungen ==
-MASTER_KEY = os.getenv("MASTER_KEY", "mein_sicherer_master_key")
+def load_progress():
+    if os.path.exists(CHECKPOINT_FILE):
+        with open(CHECKPOINT_FILE, "r") as f:
+            return json.load(f)
+    return {"tasks_completed": 0, "last_task": ""}
 
-# == Initialisiere FastAPI ==
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+def save_progress(progress):
+    with open(CHECKPOINT_FILE, "w") as f:
+        json.dump(progress, f)
 
-# == Datenbank-Konfiguration ==
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nova_ai.db")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+# 🔄 Selbstheilendes System: Falls Nova X stoppt, startet es neu!
+SCRIPT_NAME = "nova_x_main.py"
 
-class Memory(Base):
-    __tablename__ = "memory"
-    id = Column(Integer, primary_key=True, index=True)
-    key = Column(String, unique=True, index=True)
-    value = Column(Text)
+def restart_nova_x():
+    while True:
+        print(f"🚀 Starte {SCRIPT_NAME}...")
+        process = subprocess.Popen(["python", SCRIPT_NAME])
+        process.wait()
+        print(f"⚠ {SCRIPT_NAME} wurde gestoppt! Neustart in 10 Sekunden...")
+        time.sleep(10)
 
-Base.metadata.create_all(bind=engine)
+# 🔐 VPN- und TOR-Verbindung für Anonymität
+def connect_vpn(config_file="myvpn.ovpn"):
+    print("🔗 Verbinde mit VPN...")
+    subprocess.run(["openvpn", "--config", config_file])
 
-# == Datenbank-Funktionen ==
-def get_db():
-    db = SessionLocal()
+def fetch_with_tor(url="http://check.torproject.org"):
+    proxies = {"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9050"}
     try:
-        yield db
-    finally:
-        db.close()
+        response = requests.get(url, proxies=proxies)
+        print("🌍 TOR-Netzwerk aktiv! Server-Antwort:", response.text)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Fehler bei TOR: {e}")
 
-def store_memory(db: Session, key: str, value: str):
-    existing = db.query(Memory).filter(Memory.key == key).first()
-    if existing:
-        existing.value = value
+# 🤖 KI-Modelle: Wähle automatisch funktionierende KI
+GPT4ALL_MODEL = "gpt4all-falcon-q4_0.gguf"
+LLAMA_MODEL = "llama-7b.gguf"
+
+gpt_model = GPT4All(GPT4ALL_MODEL) if os.path.exists(GPT4ALL_MODEL) else None
+llama_model = Llama(model_path=LLAMA_MODEL) if os.path.exists(LLAMA_MODEL) else None
+
+# OpenAI API-Schlüssel (Falls verfügbar)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-openai-api-key")
+openai.api_key = OPENAI_API_KEY if OPENAI_API_KEY else None
+
+def call_ai(prompt):
+    """Wählt automatisch eine verfügbare KI."""
+    if gpt_model:
+        print("🧠 GPT-4All wird verwendet...")
+        with gpt_model as bot:
+            return bot.generate(prompt)
+    elif llama_model:
+        print("🦙 Llama wird verwendet...")
+        return llama_model(prompt)
+    elif openai.api_key:
+        print("☁ OpenAI API wird verwendet...")
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response['choices'][0]['message']['content']
     else:
-        db.add(Memory(key=key, value=value))
-    db.commit()
+        return "❌ Keine funktionierende KI verfügbar."
 
-def recall_memory(db: Session, key: str):
-    result = db.query(Memory).filter(Memory.key == key).first()
-    return result.value if result else None
-
-# == Web-Interface ==
-@app.get("/")
-async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-# == Sprachsteuerung (Sprache-zu-Text) ==
-@app.get("/voice_command")
-def voice_command():
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        recognizer.adjust_for_ambient_noise(source)
-        audio = recognizer.listen(source)
+# 🔄 KI-Tasks laufen parallel mit Fortschrittsspeicherung
+def continuous_task(task_description):
+    progress = load_progress()
     
+    if progress["last_task"] == task_description:
+        logging.info(f"🛠 Fortsetzung von: {task_description} (Bereits erledigt: {progress['tasks_completed']})")
+    else:
+        logging.info(f"🚀 Starte neue Aufgabe: {task_description}")
+
+    while True:
+        result = call_ai(task_description)
+        progress["tasks_completed"] += 1
+        progress["last_task"] = task_description
+        save_progress(progress)
+
+        logging.info(f"✅ Ergebnis: {result}")
+        time.sleep(1)
+
+# 📥 Download-Manager mit TOR-Unterstützung
+def resume_download(url, filename, use_tor=False):
+    headers, proxies = {}, {"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9050"} if use_tor else {}
+
     try:
-        command = recognizer.recognize_google(audio, language="de-DE")
-        return {"command": command}
-    except sr.UnknownValueError:
-        return {"error": "Sprachbefehl nicht verstanden"}
-    except sr.RequestError:
-        return {"error": "Sprachsteuerung nicht verfügbar"}
+        file_size = os.path.getsize(filename)
+        headers['Range'] = f'bytes={file_size}-'
+    except FileNotFoundError:
+        file_size = 0
 
-# == KI-Chat mit GPT4All (Offline) ==
-@app.post("/chat")
-async def chat(input_text: str, db: Session = Depends(get_db)):
-    context = recall_memory(db, "chat_history") or ""
-    response = llm.generate(context + "\nUser: " + input_text)
-    store_memory(db, "chat_history", context + "\nUser: " + input_text + "\nNova: " + response)
-    return {"response": response}
-
-# == WLAN-Status überprüfen ==
-@app.get("/wifi_status")
-def wifi_status():
     try:
-        response = os.system("ping -c 1 8.8.8.8" if platform.system() != "Windows" else "ping -n 1 8.8.8.8")
-        return {"status": "Verbunden" if response == 0 else "Nicht verbunden"}
-    except Exception as e:
-        return {"error": str(e)}
+        with requests.get(url, headers=headers, proxies=proxies, stream=True) as r:
+            if r.status_code == 416:
+                print("✅ Download bereits abgeschlossen!")
+                return
+            
+            total_size = int(r.headers.get('content-length', 0)) + file_size
+            downloaded = file_size
 
-# == Standort abrufen ==
-@app.get("/get_location")
-def get_location():
-    try:
-        response = requests.get("http://ip-api.com/json/")
-        location_data = response.json()
-        return {
-            "Stadt": location_data["city"],
-            "Land": location_data["country"],
-            "IP": location_data["query"]
-        }
-    except Exception as e:
-        return {"error": str(e)}
+            with open(filename, 'ab') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        print(f"\r📥 Fortschritt: {downloaded / total_size:.2%}", end='')
 
-# == Datei-Upload ==
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    os.makedirs("uploads", exist_ok=True)
-    file_location = f"uploads/{file.filename}"
-    with open(file_location, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    return {"message": f"Datei {file.filename} erfolgreich hochgeladen!", "path": file_location}
+        print("\n✅ Download abgeschlossen!")
+    
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Fehler beim Download: {e}")
 
-# == App-Analyse ==
-@app.get("/analyze_apps")
-def analyze_apps():
-    try:
-        apps = os.listdir("/Applications") if platform.system() == "Darwin" else os.listdir("C:\\Program Files")
-        return {"installed_apps": apps}
-    except Exception as e:
-        return {"error": str(e)}
+# 🚀 Mehrere KI-Prozesse parallel starten
+tasks = ["Erstelle eine KI", "Schreibe eine Analyse", "Verbessere den Code"]
+threads = []
 
-# == Verbindung mit anderen Apps (Dummy Funktion) ==
-@app.post("/connect_app")
-async def connect_app(app_name: str):
-    return {"message": f"Verbindung mit {app_name} hergestellt!"}
+for task in tasks:
+    thread = Thread(target=continuous_task, args=(task,))
+    thread.start()
+    threads.append(thread)
 
-# == Start der API ==
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+# 🔄 Selbstheilendes System starten
+self_healing_thread = Thread(target=restart_nova_x)
+self_healing_thread.start()
+threads.append(self_healing_thread)
+
+# 🚀 VPN & TOR starten
+connect_vpn()
+fetch_with_tor()
+
+# 📥 Test-Download über TOR
+resume_download("https://example.com/largefile.zip", "largefile.zip", use_tor=True)
+
+# 🔄 Alle Threads am Leben halten
+for thread in threads:
+    thread.join()
