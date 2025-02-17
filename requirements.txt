@@ -4,8 +4,11 @@ uvicorn
 sqlite-utils
 pydantic
 requests
-gpt4all==1.0.0
+gpt4all
 llama-cpp-python
 werkzeug
 zipfile36
 waitress
+speechrecognition
+pyttsx3
+gpt4all==1.0.0
