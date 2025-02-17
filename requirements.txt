@@ -1,14 +1,10 @@
-fastapi
-uvicorn
+flask
+gunicorn
 sqlalchemy
 sqlite-utils
 python-multipart
 pydantic
 requests
-speechrecognition
-pyttsx3
-pydub
-ffmpeg-python
-gpt4all
 jinja2
 python-dotenv
+openai
