@@ -1,10 +1,8 @@
-flask
-gunicorn
-sqlalchemy
+fastapi
+uvicorn
 sqlite-utils
-python-multipart
 pydantic
 requests
-jinja2
-python-dotenv
 openai
+gpt4all
+llama-cpp-python
