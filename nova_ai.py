@@ -5,21 +5,16 @@ import zipfile
 import subprocess
 import shutil
 import requests
-from flask import Flask, request, jsonify, render_template
 import logging
+import platform
+from flask import Flask, request, jsonify, render_template
 from datetime import datetime
-
-try:
-    from gpt4all import GPT4All  # Open-Source KI-Modelle
-    ai_model = GPT4All("ggml-gpt4all-j.bin")
-except ImportError:
-    ai_model = None
-    logging.warning("⚠️ GPT4All konnte nicht geladen werden. Wechsle zu einer Standardantwort.")
+from gpt4all import GPT4All  # Open-Source KI-Modell
 
 # Flask App initialisieren
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
-GITHUB_REPO_PATH = "/app/nova-ai"  # Ändere dies zu deinem Verzeichnis
+GITHUB_REPO = "https://github.com/DEIN_GITHUB_REPO"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
@@ -53,18 +48,37 @@ def init_db():
 
 init_db()
 
-# Open-Source KI-Modell laden (GPT4All oder Fallback)
+# Open-Source KI-Modell laden (GPT4All oder Alternative)
+def load_ai_model():
+    model_path = "models/ggml-gpt4all-j.bin"
+    
+    # Falls das Modell nicht existiert, lade es herunter
+    if not os.path.exists(model_path):
+        logging.info("Lade das KI-Modell herunter...")
+        model_url = "https://gpt4all.io/models/ggml-gpt4all-j.bin"
+        response = requests.get(model_url, stream=True)
+        with open(model_path, "wb") as model_file:
+            for chunk in response.iter_content(chunk_size=1024):
+                model_file.write(chunk)
+    
+    try:
+        model = GPT4All(model_path)
+        return model
+    except Exception as e:
+        logging.error(f"Fehler beim Laden des KI-Modells: {e}")
+        return None
+
+ai_model = load_ai_model()
+
+# KI-Logik mit Lernen
 def get_ai_response(message):
     """Holt eine Antwort von Open-Source-KI"""
     if ai_model:
-        try:
-            response = ai_model.generate(message)
-        except Exception as e:
-            response = f"⚠️ KI-Fehler: {str(e)}"
+        response = ai_model.generate(message)
+        return response
     else:
         save_knowledge(message)
-        response = f"Ich habe die Information gespeichert: {message}"
-    return response
+        return f"Ich habe die Information gespeichert: {message}"
 
 # Wissen speichern
 def save_knowledge(data):
@@ -87,24 +101,18 @@ def upload_file():
     if file.filename.endswith(".zip"):
         extract_path = os.path.join(app.config["UPLOAD_FOLDER"], "unzipped")
         os.makedirs(extract_path, exist_ok=True)
-        try:
-            with zipfile.ZipFile(file_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_path)
-            return jsonify({"message": "ZIP-Datei entpackt und analysiert"}), 200
-        except zipfile.BadZipFile:
-            return jsonify({"error": "Ungültige ZIP-Datei"}), 400
+        with zipfile.ZipFile(file_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_path)
+        return jsonify({"message": "ZIP-Datei entpackt und analysiert"}), 200
 
     return jsonify({"message": f"Datei {file.filename} gespeichert"}), 200
 
 # Automatisches Code-Update über GitHub
 @app.route("/update", methods=["POST"])
 def update_code():
-    try:
-        subprocess.run(["git", "pull"], cwd=GITHUB_REPO_PATH, check=True)
-        subprocess.run(["pip", "install", "-r", "requirements.txt"], check=True)
-        return jsonify({"message": "Code erfolgreich aktualisiert!"}), 200
-    except Exception as e:
-        return jsonify({"error": f"Update fehlgeschlagen: {str(e)}"}), 500
+    os.system(f"git pull {GITHUB_REPO}")
+    os.system("pip install -r requirements.txt")
+    return jsonify({"message": "Code aktualisiert!"}), 200
 
 # KI-Chat Route
 @app.route("/chat", methods=["POST"])
@@ -130,7 +138,5 @@ def chat():
 def home():
     return render_template("index.html")
 
-# Wichtig für Render! Gunicorn wird extern gestartet
 if __name__ == "__main__":
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000)
