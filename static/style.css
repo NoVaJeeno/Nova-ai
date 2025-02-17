@@ -1,29 +1,26 @@
-body {
-    background-image: url('/static/jarvis_ui.jpg');
-    background-size: cover;
-    background-position: center;
-    font-family: Arial, sans-serif;
-    color: white;
-    text-align: center;
-}
+document.addEventListener("DOMContentLoaded", function () {
+    const sendButton = document.getElementById("send");
+    const messageInput = document.getElementById("message");
+    const chatbox = document.getElementById("chatbox");
 
-.chat-container {
-    width: 50%;
-    margin: auto;
-    margin-top: 50px;
-    background-color: rgba(0, 0, 0, 0.8);
-    padding: 20px;
-    border-radius: 10px;
-}
+    sendButton.addEventListener("click", async function () {
+        let userMessage = messageInput.value.trim();
+        if (userMessage === "") return;
 
-input {
-    width: 70%;
-    padding: 10px;
-    border-radius: 5px;
-}
+        chatbox.innerHTML += `<p><strong>Du:</strong> ${userMessage}</p>`;
+        messageInput.value = "";
 
-button {
-    padding: 10px;
-    background-color: cyan;
-    border: none;
-}
+        let response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userMessage })
+        });
+
+        let result = await response.json();
+        if (result.response) {
+            chatbox.innerHTML += `<p><strong>KI:</strong> ${result.response}</p>`;
+        } else {
+            chatbox.innerHTML += `<p style="color:red;">Fehler: ${result.error}</p>`;
+        }
+    });
+});
