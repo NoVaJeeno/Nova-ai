@@ -3,20 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nova AI</title>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <title>Nova AI - Dein persönlicher KI-Assistent</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        #chat-box {
+            max-width: 600px;
+            margin: 20px auto;
+            text-align: left;
+            border: 1px solid #ddd;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+        }
+        input {
+            width: 70%;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
     <h1>Nova AI - Dein persönlicher KI-Assistent</h1>
-    <form id="chat-form">
-        <input type="text" id="user-input" placeholder="Schreib deine Nachricht...">
-        <button type="submit">Senden</button>
-    </form>
     <div id="chat-box"></div>
+    <input type="text" id="user-input" placeholder="Schreib deine Nachricht...">
+    <button onclick="sendMessage()">Senden</button>
+
     <script>
-        document.getElementById('chat-form').onsubmit = async function(event) {
-            event.preventDefault();
+        async function sendMessage() {
             let input = document.getElementById("user-input").value;
             let response = await fetch("/chat", {
                 method: "POST",
@@ -24,10 +45,10 @@
                 body: JSON.stringify({ message: input })
             });
             let data = await response.json();
-            document.getElementById("chat-box").innerHTML += "<p><b>Du:</b> " + input + "</p>";
-            document.getElementById("chat-box").innerHTML += "<p><b>Nova AI:</b> " + data.response + "</p>";
+            document.getElementById("chat-box").innerHTML += `<p><b>Du:</b> ${input}</p>`;
+            document.getElementById("chat-box").innerHTML += `<p><b>Nova AI:</b> ${data.response}</p>`;
             document.getElementById("user-input").value = "";
-        };
+        }
     </script>
 </body>
 </html>
