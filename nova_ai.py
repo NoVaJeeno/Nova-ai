@@ -1,26 +1,20 @@
 import os
 import sqlite3
-import json
 import zipfile
 import subprocess
 import shutil
 import requests
 import logging
-import time
-from flask import Flask, request, jsonify, render_template
 from datetime import datetime
+from flask import Flask, request, jsonify, render_template
 from gpt4all import GPT4All  # Open-Source KI-Modelle
+import speech_recognition as sr
+import pyttsx3
 
 # Flask App initialisieren
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
-GITHUB_REPO = "https://github.com/DEIN_GITHUB_REPO"
-MODEL_DIR = "models"
-MODEL_FILE = "ggml-gpt4all-j.bin"
-MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILE)
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(MODEL_DIR, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 # Logging aktivieren
@@ -53,29 +47,37 @@ def init_db():
 
 init_db()
 
-# Open-Source KI-Modell laden (GPT4All oder Alternative)
-def load_ai_model():
+# KI-Modell Pfad & automatisches Laden
+MODEL_DIR = "models"
+MODEL_FILE = "ggml-gpt4all-j.bin"
+MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILE)
+
+def download_ai_model():
+    """Lädt das KI-Modell herunter, falls es nicht existiert"""
+    if not os.path.exists(MODEL_DIR):
+        os.makedirs(MODEL_DIR)
+
     if not os.path.exists(MODEL_PATH):
         logging.info("Lade das KI-Modell herunter...")
-        model_url = "https://gpt4all.io/models/ggml-gpt4all-j.bin"
+        url = "https://gpt4all.io/models/ggml-gpt4all-j.bin"  # URL ggf. anpassen
+        response = requests.get(url, stream=True)
         
-        try:
-            response = requests.get(model_url, stream=True)
-            response.raise_for_status()
+        if response.status_code == 200:
             with open(MODEL_PATH, "wb") as model_file:
-                for chunk in response.iter_content(chunk_size=1024):
-                    model_file.write(chunk)
+                shutil.copyfileobj(response.raw, model_file)
             logging.info("Modell erfolgreich heruntergeladen.")
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Fehler beim Herunterladen des KI-Modells: {e}")
-            return None
+        else:
+            logging.error("Fehler beim Herunterladen des KI-Modells.")
 
+download_ai_model()
+
+# Open-Source KI-Modell laden (mit Fallback)
+def load_ai_model():
     try:
-        model = GPT4All(MODEL_PATH)
-        return model
-    except Exception as e:
-        logging.error(f"Fehler beim Laden des KI-Modells: {e}")
-        return None
+        return GPT4All(MODEL_PATH)
+    except Exception:
+        logging.error("Fehler beim Laden des Hauptmodells. Alternative KI wird verwendet.")
+        return None  # Alternative Logik kann hier ergänzt werden
 
 ai_model = load_ai_model()
 
@@ -83,8 +85,7 @@ ai_model = load_ai_model()
 def get_ai_response(message):
     """Holt eine Antwort von Open-Source-KI"""
     if ai_model:
-        response = ai_model.generate(message)
-        return response
+        return ai_model.generate(message)
     else:
         save_knowledge(message)
         return f"Ich habe die Information gespeichert: {message}"
@@ -119,7 +120,7 @@ def upload_file():
 # Automatisches Code-Update über GitHub
 @app.route("/update", methods=["POST"])
 def update_code():
-    os.system(f"git pull {GITHUB_REPO}")
+    os.system("git pull origin main")
     os.system("pip install -r requirements.txt")
     return jsonify({"message": "Code aktualisiert!"}), 200
 
@@ -142,62 +143,36 @@ def chat():
 
     return jsonify({"response": response})
 
+# Sprachsteuerung (Spracheingabe & Sprachausgabe)
+def recognize_speech():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        logging.info("Spracheingabe erkannt...")
+        audio = recognizer.listen(source)
+    try:
+        return recognizer.recognize_google(audio)
+    except sr.UnknownValueError:
+        return "Konnte Sprache nicht erkennen."
+    except sr.RequestError:
+        return "Fehler beim Zugriff auf Sprachdienst."
+
+def speak(text):
+    engine = pyttsx3.init()
+    engine.say(text)
+    engine.runAndWait()
+
+# Sprachsteuerung Route
+@app.route("/voice", methods=["GET"])
+def voice_command():
+    command = recognize_speech()
+    response = get_ai_response(command)
+    speak(response)
+    return jsonify({"response": response})
+
 # Webinterface
 @app.route("/")
 def home():
     return render_template("index.html")
-
-# WLAN-Zugriff erlauben (nur auf Befehl des Admins)
-@app.route("/wifi_access", methods=["POST"])
-def wifi_access():
-    data = request.get_json()
-    allow_access = data.get("allow")
-
-    if allow_access:
-        logging.info("WLAN-Zugriff wurde gewährt.")
-        return jsonify({"message": "WLAN-Zugriff erlaubt."}), 200
-    else:
-        return jsonify({"message": "Zugriff verweigert."}), 403
-
-# Sprachausgabe-Funktion
-@app.route("/speak", methods=["POST"])
-def speak():
-    data = request.get_json()
-    text = data.get("text")
-    if not text:
-        return jsonify({"error": "Kein Text für Sprachausgabe erhalten"}), 400
-
-    try:
-        subprocess.run(["say", text])  # Funktioniert auf macOS
-        return jsonify({"message": "Text gesprochen"}), 200
-    except Exception as e:
-        return jsonify({"error": f"Sprachausgabe fehlgeschlagen: {str(e)}"}), 500
-
-# Automatische Architektur-Generierung
-@app.route("/generate_architecture", methods=["POST"])
-def generate_architecture():
-    try:
-        arch_script = """
-        import json
-
-        architecture = {
-            "services": ["Webserver", "Datenbank", "KI-Modell"],
-            "connections": ["API-Calls", "Datenfluss"]
-        }
-
-        with open("architecture.json", "w") as f:
-            json.dump(architecture, f)
-
-        print("Architektur-Datei erstellt!")
-        """
-
-        with open("generate_arch.py", "w") as f:
-            f.write(arch_script)
-
-        subprocess.run(["python", "generate_arch.py"])
-        return jsonify({"message": "Architektur generiert"}), 200
-    except Exception as e:
-        return jsonify({"error": f"Fehler bei der Architektur-Generierung: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
