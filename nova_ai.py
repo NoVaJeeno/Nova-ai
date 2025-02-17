@@ -6,16 +6,21 @@ import subprocess
 import shutil
 import requests
 import logging
-import platform
+import time
 from flask import Flask, request, jsonify, render_template
 from datetime import datetime
-from gpt4all import GPT4All  # Open-Source KI-Modell
+from gpt4all import GPT4All  # Open-Source KI-Modelle
 
 # Flask App initialisieren
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 GITHUB_REPO = "https://github.com/DEIN_GITHUB_REPO"
+MODEL_DIR = "models"
+MODEL_FILE = "ggml-gpt4all-j.bin"
+MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILE)
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 # Logging aktivieren
@@ -50,19 +55,23 @@ init_db()
 
 # Open-Source KI-Modell laden (GPT4All oder Alternative)
 def load_ai_model():
-    model_path = "models/ggml-gpt4all-j.bin"
-    
-    # Falls das Modell nicht existiert, lade es herunter
-    if not os.path.exists(model_path):
+    if not os.path.exists(MODEL_PATH):
         logging.info("Lade das KI-Modell herunter...")
         model_url = "https://gpt4all.io/models/ggml-gpt4all-j.bin"
-        response = requests.get(model_url, stream=True)
-        with open(model_path, "wb") as model_file:
-            for chunk in response.iter_content(chunk_size=1024):
-                model_file.write(chunk)
-    
+        
+        try:
+            response = requests.get(model_url, stream=True)
+            response.raise_for_status()
+            with open(MODEL_PATH, "wb") as model_file:
+                for chunk in response.iter_content(chunk_size=1024):
+                    model_file.write(chunk)
+            logging.info("Modell erfolgreich heruntergeladen.")
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Fehler beim Herunterladen des KI-Modells: {e}")
+            return None
+
     try:
-        model = GPT4All(model_path)
+        model = GPT4All(MODEL_PATH)
         return model
     except Exception as e:
         logging.error(f"Fehler beim Laden des KI-Modells: {e}")
@@ -137,6 +146,58 @@ def chat():
 @app.route("/")
 def home():
     return render_template("index.html")
+
+# WLAN-Zugriff erlauben (nur auf Befehl des Admins)
+@app.route("/wifi_access", methods=["POST"])
+def wifi_access():
+    data = request.get_json()
+    allow_access = data.get("allow")
+
+    if allow_access:
+        logging.info("WLAN-Zugriff wurde gewährt.")
+        return jsonify({"message": "WLAN-Zugriff erlaubt."}), 200
+    else:
+        return jsonify({"message": "Zugriff verweigert."}), 403
+
+# Sprachausgabe-Funktion
+@app.route("/speak", methods=["POST"])
+def speak():
+    data = request.get_json()
+    text = data.get("text")
+    if not text:
+        return jsonify({"error": "Kein Text für Sprachausgabe erhalten"}), 400
+
+    try:
+        subprocess.run(["say", text])  # Funktioniert auf macOS
+        return jsonify({"message": "Text gesprochen"}), 200
+    except Exception as e:
+        return jsonify({"error": f"Sprachausgabe fehlgeschlagen: {str(e)}"}), 500
+
+# Automatische Architektur-Generierung
+@app.route("/generate_architecture", methods=["POST"])
+def generate_architecture():
+    try:
+        arch_script = """
+        import json
+
+        architecture = {
+            "services": ["Webserver", "Datenbank", "KI-Modell"],
+            "connections": ["API-Calls", "Datenfluss"]
+        }
+
+        with open("architecture.json", "w") as f:
+            json.dump(architecture, f)
+
+        print("Architektur-Datei erstellt!")
+        """
+
+        with open("generate_arch.py", "w") as f:
+            f.write(arch_script)
+
+        subprocess.run(["python", "generate_arch.py"])
+        return jsonify({"message": "Architektur generiert"}), 200
+    except Exception as e:
+        return jsonify({"error": f"Fehler bei der Architektur-Generierung: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
