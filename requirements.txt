@@ -1,5 +1,6 @@
 flask
 gunicorn
+uvicorn
 sqlite-utils
 pydantic
 requests
