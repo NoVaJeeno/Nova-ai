@@ -8,4 +8,3 @@ gpt4all
 llama-cpp-python
 werkzeug
 zipfile36
-waitress
