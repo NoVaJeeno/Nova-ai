@@ -1,8 +1,9 @@
 flask
-uvicorn
+gunicorn
 sqlite-utils
 pydantic
 requests
 gpt4all
 llama-cpp-python
-gunicorn
+werkzeug
+zipfile36
