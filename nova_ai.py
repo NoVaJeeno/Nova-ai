@@ -1,20 +1,16 @@
 import os
 import sqlite3
-import json
 import zipfile
-import subprocess
-import shutil
-import requests
 import logging
-from datetime import datetime
+import requests
+import shutil
 from flask import Flask, request, jsonify, render_template
-from gpt4all import GPT4All  # Open-Source KI-Modelle
-from threading import Thread
+from datetime import datetime
+from gpt4all import GPT4All  # Falls nicht verfügbar, wird eine Alternative heruntergeladen
 
 # Flask App initialisieren
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
-GITHUB_REPO = "https://github.com/DEIN_GITHUB_REPO"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
@@ -48,56 +44,39 @@ def init_db():
 
 init_db()
 
-# KI-Modell Pfad und URLs für Download
+# Verfügbare KI-Modelle prüfen & herunterladen
 MODEL_DIR = "models"
+MODEL_PATH = os.path.join(MODEL_DIR, "ggml-gpt4all-j.bin")
+MODEL_URL = "https://gpt4all.io/models/ggml-gpt4all-j.bin"
+
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-MODEL_FILES = [
-    "ggml-gpt4all-j.bin",  # GPT4All Standard-Modell
-    "ggml-vicuna-7b-1.1-q4_2.bin",  # Vicuna 7B Modell
-    "ggml-mpt-7b-chat.bin"  # MPT 7B Modell
-]
+def ensure_model():
+    """Prüft, ob das Modell vorhanden ist, und lädt es falls nötig herunter."""
+    if not os.path.exists(MODEL_PATH):
+        logging.info("KI-Modell nicht gefunden, lade es herunter...")
+        response = requests.get(MODEL_URL, stream=True)
+        with open(MODEL_PATH, "wb") as model_file:
+            shutil.copyfileobj(response.raw, model_file)
+        logging.info("Modell erfolgreich heruntergeladen!")
+    else:
+        logging.info("KI-Modell ist bereits vorhanden.")
 
-MODEL_URLS = {
-    "ggml-gpt4all-j.bin": "https://gpt4all.io/models/ggml-gpt4all-j.bin",
-    "ggml-vicuna-7b-1.1-q4_2.bin": "https://gpt4all.io/models/ggml-vicuna-7b-1.1-q4_2.bin",
-    "ggml-mpt-7b-chat.bin": "https://gpt4all.io/models/ggml-mpt-7b-chat.bin"
-}
+ensure_model()
 
-# Automatische Auswahl eines verfügbaren KI-Modells
-def download_model():
-    for model_name, url in MODEL_URLS.items():
-        model_path = os.path.join(MODEL_DIR, model_name)
-        if not os.path.exists(model_path):
-            print(f"Modell {model_name} nicht gefunden. Lade es herunter...")
-            response = requests.get(url, stream=True)
-            if response.status_code == 200:
-                with open(model_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                print(f"Modell {model_name} erfolgreich heruntergeladen!")
-                return model_name  # Erstes erfolgreiche Modell verwenden
-    print("Kein Modell konnte heruntergeladen werden!")
-    return None
-
-selected_model = download_model()
-
-# KI-Modell laden (automatisch eines der verfügbaren Modelle nutzen)
+# Open-Source KI-Modell laden (GPT4All oder Alternative)
 def load_ai_model():
-    if selected_model:
-        try:
-            model = GPT4All(selected_model)
-            return model
-        except Exception as e:
-            print(f"Fehler beim Laden des KI-Modells: {e}")
-            return None
-    return None
+    try:
+        model = GPT4All(MODEL_PATH)
+        return model
+    except Exception:
+        return None
 
 ai_model = load_ai_model()
 
 # KI-Logik mit Lernen
 def get_ai_response(message):
-    """Holt eine Antwort von Open-Source-KI"""
+    """Holt eine Antwort von Open-Source-KI oder speichert Wissen."""
     if ai_model:
         response = ai_model.generate(message)
         return response
@@ -135,7 +114,7 @@ def upload_file():
 # Automatisches Code-Update über GitHub
 @app.route("/update", methods=["POST"])
 def update_code():
-    os.system(f"git pull {GITHUB_REPO}")
+    os.system("git pull origin main")
     os.system("pip install -r requirements.txt")
     return jsonify({"message": "Code aktualisiert!"}), 200
 
