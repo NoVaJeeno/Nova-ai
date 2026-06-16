@@ -1,13 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AuthProvider } from "../providers/AuthProvider";
-import { StorageProvider } from "../providers/StorageProvider";
-import { ToolProvider } from "../providers/ToolProvider";
-import { ToolInitializer } from "../components/ToolInitializer";
+import { ClaudeProvider } from "../providers/ClaudeProvider";
 
 export const metadata: Metadata = {
-  title: "Ultimate Chat KI",
-  description: "Deine ultimative Entwicklungsplattform.",
+  title: "Claude System App",
+  description: "Dein ultimatives Claude-gesteuertes Ökosystem.",
 };
 
 export default function RootLayout({
@@ -18,14 +15,9 @@ export default function RootLayout({
   return (
     <html lang="de">
       <body>
-        <AuthProvider>
-          <StorageProvider>
-            <ToolProvider>
-              <ToolInitializer />
-              {children}
-            </ToolProvider>
-          </StorageProvider>
-        </AuthProvider>
+        <ClaudeProvider>
+          {children}
+        </ClaudeProvider>
       </body>
     </html>
   );
