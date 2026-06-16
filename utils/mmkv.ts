@@ -1,9 +1,9 @@
 import { MMKV } from 'react-native-mmkv';
 
-// Speicherkonfiguration für Ultimate AURA
+// Sicherer Speicher für die Claude-Ultimate-App
 export const memory = new MMKV({
-  id: 'ultimate_aura_storage',
-  encryptionKey: 'aura_secret_2026', // Härtung gegen Hacker
+  id: 'claude_system_storage',
+  encryptionKey: 'claude_ultimate_secure_2026',
 });
 
 export const savePersistent = (key: string, value: any) => {
